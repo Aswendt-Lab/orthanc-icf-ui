@@ -3,6 +3,7 @@ from tempfile import gettempdir
 from zipfile import ZipFile
 
 from textual.app import App, ComposeResult
+from textual.containers import Horizontal
 from textual.widgets import (
     Header,
     Footer,
@@ -25,7 +26,7 @@ import subprocess
 from rich.text import Text
 
 
-def query_orthanc(date: str) -> list:
+def query_orthanc(date: str, user: str, password: str) -> list:
     baseurl = "http://localhost:8042"
 
     d = {
@@ -38,13 +39,17 @@ def query_orthanc(date: str) -> list:
     r = requests.post(
         url=f"{baseurl}/tools/find",
         json=d,
+        auth=(user, password),
     )
+
+    if not r.ok:
+        r.raise_for_status()
 
     matched_ids = r.json()
 
     results = []
     for study_id in matched_ids:
-        r = requests.get(f"{baseurl}/studies/{study_id}")
+        r = requests.get(f"{baseurl}/studies/{study_id}", auth=(user, password))
         d = r.json()
         patientID = d.get("PatientMainDicomTags", {}).get("PatientID")
         results.append((patientID, study_id))  # orthanc study id
@@ -75,10 +80,16 @@ async def export_zipfile(study_id: str) -> None:
 
 class OrthancApp(App):
     BINDINGS = [("q", "quit", "Quit")]
+    CSS_PATH="style.tcss"
 
     def compose(self) -> ComposeResult:
         """Create child widgets for the app."""
         yield Header()
+        with Horizontal(classes="onerow"):
+            yield Input(placeholder="Username", id="user_input", classes="column")
+            yield Input(placeholder="Password", id="password_input", classes="column", password=True)
+
+        # yield LoginBox(classes="onerow")
         yield Input(placeholder="Study date", id="date_input")
         yield SelectionList(id="sel_list")
         yield Button("Export", id="export_button", disabled=True)
@@ -89,9 +100,18 @@ class OrthancApp(App):
         if event.input.id == "date_input":
             sl = self.get_child_by_id("sel_list")
             sl.clear_options()
+
+            user = self.get_widget_by_id("user_input").value
+            password = self.get_widget_by_id("password_input").value
+
             if event.input.value != "":
                 # orthanc sees "" as "any", but we are different
-                res = query_orthanc(event.input.value)
+                try:
+                    res = query_orthanc(event.input.value, user, password)
+                except requests.exceptions.HTTPError as e:
+                    log = self.query_one(RichLog)
+                    log.write(e)
+                    res = []
                 sl.add_options(res)
 
     async def mock_call(self, cmd):

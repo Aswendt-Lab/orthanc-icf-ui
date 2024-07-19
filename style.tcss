@@ -1,0 +1,11 @@
+/* -*- mode: css; -*- */
+
+.onerow {
+    height: 3;
+    margin: 1;
+}
+
+.column {
+    width: 1fr;
+}
+
