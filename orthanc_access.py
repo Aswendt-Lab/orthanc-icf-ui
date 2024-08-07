@@ -114,11 +114,6 @@ class OrthancApp(App):
                     res = []
                 sl.add_options(res)
 
-    async def mock_call(self, cmd):
-        log = self.query_one(RichLog)
-        await asyncio.sleep(2)
-        log.write(f"Completed {cmd}")
-        return 1
 
     async def call_icf(self, cmd: str, *args) -> None:
         icf_image = Path.home() / "Documents" / "inm-icf-utilities" / "icf.sif"
