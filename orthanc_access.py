@@ -192,10 +192,15 @@ class OrthancApp(App):
 
         # login to orthanc (credentials check)
         if event.worker.name == "login":
+            connect_button = self.get_widget_by_id("connect_button")
             date_input = self.get_widget_by_id("date_input")
             if event.state == WorkerState.SUCCESS:
                 log.write("Connected successfully")
                 date_input.disabled = False
+                connect_button.variant = "success"
+            elif event.state == WorkerState.ERROR:
+                date_input.disabled = True
+                connect_button.variant = "error"
 
         # query orthanc
         elif event.worker.name == "query":
