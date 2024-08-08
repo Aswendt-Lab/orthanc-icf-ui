@@ -1,4 +1,6 @@
+import asyncio
 from pathlib import Path
+import subprocess
 from tempfile import gettempdir
 from zipfile import ZipFile
 
@@ -11,17 +13,11 @@ from textual.widgets import (
     SelectionList,
     Button,
     RichLog,
-    ProgressBar,
 )
 from textual.worker import Worker, WorkerState
 
-import time
-import asyncio
 import aiofiles
 import httpx
-import subprocess
-
-from rich.text import Text
 
 
 class OrthancClient:
@@ -91,7 +87,7 @@ class OrthancClient:
 
 class OrthancApp(App):
     BINDINGS = [("q", "quit", "Quit")]
-    CSS_PATH="style.tcss"
+    CSS_PATH = "style.tcss"
 
     def __init__(self):
         super().__init__()
@@ -102,10 +98,14 @@ class OrthancApp(App):
         yield Header()
         with Horizontal(classes="onerow"):
             yield Input(placeholder="Username", id="user_input", classes="column")
-            yield Input(placeholder="Password", id="password_input", classes="column", password=True)
+            yield Input(
+                placeholder="Password",
+                id="password_input",
+                classes="column",
+                password=True,
+            )
             yield Button("Connect", id="connect_button")
 
-        # yield LoginBox(classes="onerow")
         yield Input(placeholder="Study date", id="date_input", disabled=True)
         yield SelectionList(id="sel_list")
         yield Button("Export", id="export_button", disabled=True)
@@ -119,7 +119,12 @@ class OrthancApp(App):
 
             if event.input.value != "":
                 # orthanc sees "" as "any", but we are different
-                self.run_worker(self.orthanc.query(event.input.value), name="query", exclusive=True, exit_on_error=False)
+                self.run_worker(
+                    self.orthanc.query(event.input.value),
+                    name="query",
+                    exclusive=True,
+                    exit_on_error=False,
+                )
 
     async def call_icf(self, cmd: str, *args) -> None:
         icf_image = Path.home() / "Documents" / "inm-icf-utilities" / "icf.sif"
@@ -171,12 +176,16 @@ class OrthancApp(App):
         if event.button.id == "connect_button":
             user = self.get_widget_by_id("user_input").value
             password = self.get_widget_by_id("password_input").value
-            self.run_worker(self.orthanc.login(user, password), name="login", exclusive=True, exit_on_error=False)
+            self.run_worker(
+                self.orthanc.login(user, password),
+                name="login",
+                exclusive=True,
+                exit_on_error=False,
+            )
 
         if event.button.id == "export_button":
             sl = self.get_child_by_id("sel_list")
             self.run_worker(self.do_stuff(sl.selected), exclusive=True)
-
 
     def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
         log = self.query_one(RichLog)
@@ -198,7 +207,6 @@ class OrthancApp(App):
         if event.state == WorkerState.ERROR:
             log.write(event)
             log.write(event.worker.error)
-
 
     def on_selection_list_selected_changed(
         self, event: SelectionList.SelectedChanged
