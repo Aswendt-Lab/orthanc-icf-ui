@@ -57,14 +57,14 @@ def query_orthanc(date: str, user: str, password: str) -> list:
     return results
 
 
-async def export_zipfile(study_id: str) -> None:
+async def export_zipfile(study_id: str, user: str, password: str) -> Path:
     baseurl = "http://localhost:8042"
     outdir = Path(gettempdir())
 
     zip_path = outdir.joinpath(f"{study_id}.zip")
     out_path = outdir.joinpath(f"{study_id}")
 
-    client = httpx.AsyncClient()
+    client = httpx.AsyncClient(auth=(user, password))
     async with client.stream("GET", f"{baseurl}/studies/{study_id}/archive") as r:
         async with aiofiles.open(zip_path, "wb") as f:
             async for chunk in r.aiter_bytes(chunk_size=10 * 1024):
@@ -138,14 +138,14 @@ class OrthancApp(App):
 
         log.write(f"({msg}) {cmd}")
 
-    async def do_stuff(self, subject_ids: list):
+    async def do_stuff(self, subject_ids: list, user: str, password: str):
         log = self.query_one(RichLog)
 
         for s in subject_ids:
             log.write(f"Processing dicom study id {s}")
 
             # export dicoms from orthanc
-            dicom_dir = await export_zipfile(s)
+            dicom_dir = await export_zipfile(s, user, password)
             log.write(f"Exported {dicom_dir}")
 
             # TODO: make paths depend on input
@@ -163,10 +163,14 @@ class OrthancApp(App):
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "export_button":
+
+            user = self.get_widget_by_id("user_input").value
+            password = self.get_widget_by_id("password_input").value
+
             sl = self.get_child_by_id("sel_list")
             log = self.query_one(RichLog)
 
-            self.run_worker(self.do_stuff(sl.selected), exclusive=True)
+            self.run_worker(self.do_stuff(sl.selected, user, password), exclusive=True)
 
     def on_selection_list_selected_changed(
         self, event: SelectionList.SelectedChanged
