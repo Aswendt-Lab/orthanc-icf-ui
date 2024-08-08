@@ -1,7 +1,9 @@
 import asyncio
+from collections import namedtuple
 from pathlib import Path
 import subprocess
 from tempfile import gettempdir
+import tomllib
 from zipfile import ZipFile
 
 from textual.app import App, ComposeResult
@@ -18,11 +20,12 @@ from textual.worker import Worker, WorkerState
 
 import aiofiles
 import httpx
+import platformdirs
 
 
 class OrthancClient:
-    def __init__(self):
-        self.baseurl = "http://localhost:8042"
+    def __init__(self, baseurl):
+        self.baseurl = baseurl
         self.client = None
 
     async def login(self, user, password) -> None:
@@ -91,7 +94,8 @@ class OrthancApp(App):
 
     def __init__(self):
         super().__init__()
-        self.orthanc = OrthancClient()
+        self.config = self._get_config()
+        self.orthanc = OrthancClient(self.config.orthanc_base_url)
 
     def compose(self) -> ComposeResult:
         """Create child widgets for the app."""
@@ -127,13 +131,11 @@ class OrthancApp(App):
                 )
 
     async def call_icf(self, cmd: str, *args) -> None:
-        icf_image = Path.home() / "Documents" / "inm-icf-utilities" / "icf.sif"
-
         log = self.query_one(RichLog)
 
         # ignore stdin/out for now, just wait for process to exit
         proc = await asyncio.create_subprocess_exec(
-            icf_image,
+            self.config.icf_image,
             cmd,
             *args,
             stdin=subprocess.DEVNULL,
@@ -163,7 +165,7 @@ class OrthancApp(App):
             result = await self.call_icf(
                 "make_studyvisit_archive",
                 "--output-dir",
-                "/tmp/store",
+                self.config.store_base_dir,
                 "--id",
                 "study-id",
                 "visit-id",
@@ -223,6 +225,37 @@ class OrthancApp(App):
             btn.disabled = False
         else:
             btn.disabled = True
+
+    def _get_config(self):
+        """Read configuration from a file in a standard location"""
+
+        app = "orthanc_textual"
+        files = [
+            Path(d) / "config.toml"
+            for d in (
+                platformdirs.user_config_dir(app),
+                platformdirs.site_config_dir(app),
+            )
+        ]
+
+        for config_file in files:
+            if config_file.is_file():
+                with config_file.open("rb") as f:
+                    cfg = tomllib.load(f)
+                break
+            else:
+                msg = f"No config file found. Please create either of {files}."
+                raise RuntimeError(msg)
+
+        Config = namedtuple(
+            "Config", ["orthanc_base_url", "icf_image", "store_base_dir"]
+        )
+        config = Config(
+            cfg.get("orthanc_base_url"),
+            Path(cfg["icf_image"]).expanduser(),
+            Path(cfg["store_base_dir"]).expanduser(),
+        )
+        return config
 
 
 if __name__ == "__main__":
