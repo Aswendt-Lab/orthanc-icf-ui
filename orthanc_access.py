@@ -96,6 +96,7 @@ class OrthancApp(App):
         super().__init__()
         self.config = self._get_config()
         self.orthanc = OrthancClient(self.config.orthanc_base_url)
+        self.listed_studies = {}
 
     def compose(self) -> ComposeResult:
         """Create child widgets for the app."""
@@ -151,24 +152,26 @@ class OrthancApp(App):
 
         log.write(f"({msg}) {cmd}")
 
-    async def do_stuff(self, subject_ids: list):
+    async def do_stuff(self, orthanc_study_ids: list):
         log = self.query_one(RichLog)
 
-        for s in subject_ids:
+        for s in orthanc_study_ids:
             log.write(f"Processing dicom study id {s}")
 
             # export dicoms from orthanc
             dicom_dir = await self.orthanc.export(s)
             log.write(f"Exported {dicom_dir}")
 
-            # TODO: make paths depend on input
+            # figure out study & visit ID from patient ID
+            study_id, visit_id = self._parse_id(self.listed_studies[s])
+
             result = await self.call_icf(
                 "make_studyvisit_archive",
                 "--output-dir",
                 self.config.store_base_dir,
                 "--id",
-                "study-id",
-                "visit-id",
+                study_id,
+                visit_id,
                 dicom_dir,
             )
 
@@ -207,8 +210,13 @@ class OrthancApp(App):
         # query orthanc
         elif event.worker.name == "query":
             if event.state == WorkerState.SUCCESS:
+                # add query result to selection list
                 sl = self.get_child_by_id("sel_list")
                 sl.add_options(event.worker.result)
+                # store the mapping for lookup later
+                self.listed_studies = {
+                    study_id: patientID for patientID, study_id in event.worker.result
+                }
 
         # do not let errors pass unnoticed
         if event.state == WorkerState.ERROR:
@@ -225,6 +233,24 @@ class OrthancApp(App):
             btn.disabled = False
         else:
             btn.disabled = True
+
+    def _parse_id(self, identifier) -> tuple[str, str]:
+        """Parse dicom PatientID into study and visit identifier
+
+        Here, we rely on convention being used for PatientIDs stored
+        in dicom headers, with first underscore delimiting the study
+        ID from visit identifier.
+
+        If the split cannot be performed, we make the study ID
+        "undefined" and the whole thing becomes a visit ID.
+
+        """
+
+        study, _, visit = identifier.partition("_")
+        if visit == "":
+            study, visit = "unknown", study
+
+        return study, visit
 
     def _get_config(self):
         """Read configuration from a file in a standard location"""
