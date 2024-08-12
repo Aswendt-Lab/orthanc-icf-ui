@@ -24,6 +24,8 @@ import platformdirs
 
 
 class OrthancClient:
+    """Interactions with the Orthanc API"""
+
     def __init__(self, baseurl):
         self.baseurl = baseurl
         self.client = None
@@ -45,6 +47,17 @@ class OrthancClient:
         response.raise_for_status()
 
     async def query(self, date: str) -> list:
+        """Perform a date query using /tools/find API
+
+        Runs the /tools/find query for a given StudyDate, and then a
+        /studies/{id} query to find matching PatientIDs.
+
+        Returns results as a list of (patientID, study_id) tuples (the
+        first coming from dicom, the second being orthanc study ID),
+        which can e.g. be plugged directly intu textual's
+        SelectionList.
+
+        """
         d = {
             "Level": "Study",
             "Query": {
@@ -69,6 +82,13 @@ class OrthancClient:
         return results
 
     async def export(self, study_id: str) -> Path:
+        """Export dicoms from Orthanc
+
+        Uses the /studies/{id}/archive API endpoint, unpacks and
+        removes the zipfile. Returns the path to the extracted
+        directory.
+
+        """
         outdir = Path(gettempdir())
         zip_path = outdir.joinpath(f"{study_id}.zip")
         out_path = outdir.joinpath(f"{study_id}")
@@ -89,6 +109,8 @@ class OrthancClient:
 
 
 class OrthancApp(App):
+    """Textual app, with UI and logic for the Orthanc-ICF workflow"""
+
     BINDINGS = [("q", "quit", "Quit")]
     CSS_PATH = "style.tcss"
 
@@ -132,6 +154,12 @@ class OrthancApp(App):
                 )
 
     async def call_icf(self, cmd: str, *args) -> None:
+        """Helper to call ICF commands as asyncio subprocesses
+
+        Creates the subprocess, awaits its exit, and prints the result
+        (ok/error) in the log window.
+
+        """
         log = self.query_one(RichLog)
 
         # ignore stdin/out for now, just wait for process to exit
@@ -152,7 +180,12 @@ class OrthancApp(App):
 
         log.write(f"({msg}) {cmd}")
 
-    async def icf_workflow(self, orthanc_study_ids: list):
+    async def icf_workflow(self, orthanc_study_ids: list) -> None:
+        """Run the workflow: orthanc export, icf utils
+
+        Loops over all selected orthanc studies.
+
+        """
         log = self.query_one(RichLog)
 
         for s in orthanc_study_ids:
