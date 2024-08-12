@@ -159,8 +159,13 @@ class OrthancApp(App):
             log.write(f"Processing dicom study id {s}")
 
             # export dicoms from orthanc
-            dicom_dir = await self.orthanc.export(s)
-            log.write(f"Exported {dicom_dir}")
+            export_dir = await self.orthanc.export(s)
+            log.write(f"Exported {export_dir}")
+
+            # work on subdirectory (<orthanc study id>/<subject ID> <subject name>)
+            subdirs = [child for child in export_dir.iterdir() if child.is_dir()]
+            assert len(subdirs) == 1
+            dicom_dir = subdirs[0]
 
             # figure out study & visit ID from patient ID
             study_id, visit_id = self._parse_id(self.listed_studies[s])
