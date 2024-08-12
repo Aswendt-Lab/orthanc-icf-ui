@@ -1,0 +1,4 @@
+aiofiles
+httpx
+platformdirs
+textual >= 0.70.0
