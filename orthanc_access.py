@@ -139,20 +139,6 @@ class OrthancApp(App):
         yield RichLog(highlight=True, markup=True)
         yield Footer()
 
-    def on_input_submitted(self, event: Input.Submitted) -> None:
-        if event.input.id == "date_input":
-            sl = self.get_child_by_id("sel_list")
-            sl.clear_options()
-
-            if event.input.value != "":
-                # orthanc sees "" as "any", but we are different
-                self.run_worker(
-                    self.orthanc.query(event.input.value),
-                    name="query",
-                    exclusive=True,
-                    exit_on_error=False,
-                )
-
     async def call_icf(self, cmd: str, *args) -> None:
         """Helper to call ICF commands as asyncio subprocesses
 
@@ -240,6 +226,20 @@ class OrthancApp(App):
                 study_id,
                 visit_id,
             )
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id == "date_input":
+            sl = self.get_child_by_id("sel_list")
+            sl.clear_options()
+
+            if event.input.value != "":
+                # orthanc sees "" as "any", but we are different
+                self.run_worker(
+                    self.orthanc.query(event.input.value),
+                    name="query",
+                    exclusive=True,
+                    exit_on_error=False,
+                )
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "connect_button":
