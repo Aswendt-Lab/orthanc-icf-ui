@@ -152,7 +152,7 @@ class OrthancApp(App):
 
         log.write(f"({msg}) {cmd}")
 
-    async def do_stuff(self, orthanc_study_ids: list):
+    async def icf_workflow(self, orthanc_study_ids: list):
         log = self.query_one(RichLog)
 
         for s in orthanc_study_ids:
@@ -172,7 +172,7 @@ class OrthancApp(App):
 
             result = await self.call_icf(
                 "make_studyvisit_archive",
-                "--output-dir",
+                "--output-dir",  # psychoinformatics-de/inm-icf-utilities/issues/52
                 self.config.store_base_dir,
                 "--id",
                 study_id,
@@ -180,7 +180,33 @@ class OrthancApp(App):
                 dicom_dir,
             )
 
-            # TODO: following icf steps
+            result = await self.call_icf(
+                "deposit_visit_metadata",
+                "--store-dir",
+                self.config.store_base_dir,
+                "--id",
+                study_id,
+                visit_id,
+            )
+
+            result = await self.call_icf(
+                "deposit_visit_dataset",
+                "--store-dir",
+                self.config.store_base_dir,
+                "--id",
+                study_id,
+                visit_id,
+                # todo: --store-url (once we know it)
+            )
+
+            result = await self.call_icf(
+                "catalogify_studyvisit_from_meta",
+                "--store-dir",
+                self.config.store_base_dir,
+                "--id",
+                study_id,
+                visit_id,
+            )
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "connect_button":
@@ -195,7 +221,9 @@ class OrthancApp(App):
 
         if event.button.id == "export_button":
             sl = self.get_child_by_id("sel_list")
-            self.run_worker(self.do_stuff(sl.selected), exclusive=True)
+            self.run_worker(
+                self.icf_workflow(sl.selected), exclusive=True, name="icf_workflow"
+            )
 
     def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
         log = self.query_one(RichLog)
@@ -222,6 +250,10 @@ class OrthancApp(App):
                 self.listed_studies = {
                     study_id: patientID for patientID, study_id in event.worker.result
                 }
+
+        elif event.worker.name == "icf_workflow":
+            if event.state == WorkerState.SUCCESS:
+                log.write("[green]DONE[/green]")
 
         # do not let errors pass unnoticed
         if event.state == WorkerState.ERROR:
