@@ -6,6 +6,9 @@ from tempfile import gettempdir
 import tomllib
 from zipfile import ZipFile
 
+import os
+import shutil
+
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal
 from textual.widgets import (
@@ -183,7 +186,7 @@ class OrthancApp(App):
 
             # work on subdirectory (<orthanc study id>/<subject ID> <subject name>)
             subdirs = [child for child in export_dir.iterdir() if child.is_dir()]
-            assert len(subdirs) == 1
+            #assert len(subdirs) == 1 #STEFFI
             dicom_dir = subdirs[0]
 
             # figure out study & visit ID from patient ID
@@ -226,6 +229,61 @@ class OrthancApp(App):
                 study_id,
                 visit_id,
             )
+            
+            #STEFFI
+            # Define the path to the dcm2niix executable
+            log.write("STEFFI")
+            p = export_dir
+            log.write("p is ")
+            log.write(str(p))
+            p2 = self.config.store_base_dir_niftis #store_base_dir_niftis
+            log.write("p2 is ")
+            log.write(str(p2))
+            dcm2niix_path = "/usr/bin/dcm2niix"  # Adjust this to the correct path
+            stef_input_dir = str(p)
+            stef_output_dir = str(p)+str('/niftis')
+            log.write("stef_output_dir is ")
+            log.write(str(stef_output_dir))
+            #os.mkdir(stef_output_dir)
+            try:
+                os.mkdir(stef_output_dir)
+            except:
+                log.write("nifti tmp dir already exists")
+            command = [dcm2niix_path, "-f", "%i_%p" ,"-o", stef_output_dir, stef_input_dir]
+            #log.write("nifti conversion starts")
+	    
+            try:
+                # Run the command
+                log.write("start nifti conversion")
+                result = subprocess.run(command, check=True, capture_output=True, text=True)
+            except:
+                log.write("NOPE to nifti conversion")
+
+
+	
+	
+            #log.write('nifti archiving... starts')
+            #os.mkdir(str(p2)+visit_id)
+            #shutil.make_archive(str(p2)+visit_id, 'zip', stef_output_dir)
+            #breakgizuguo
+            try:
+                log.write('nifti archiving... starts')
+                shutil.make_archive(str(p2)+'/'+study_id+'/'+visit_id, 'zip', stef_output_dir)
+            except:
+                log.write('study name already exists, so dummy is added to the visit_id')
+                try:
+                    shutil.make_archive(str(p2)+'/'+study_id+'/'+str('dummy')+visit_id, 'zip', stef_output_dir)
+                except: 
+                    log.write("pls check names in database. Study_Visit_IDs have to be unique!!")
+                
+            log.write('archiving... finishes')
+        
+        
+            log.write('delete Orthanc temporary files')
+            shutil.rmtree(p)
+            #os.remove(str(p)+'.zip')
+	    
+            
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id == "date_input":
@@ -344,12 +402,13 @@ class OrthancApp(App):
                 raise RuntimeError(msg)
 
         Config = namedtuple(
-            "Config", ["orthanc_base_url", "icf_image", "store_base_dir"]
+            "Config", ["orthanc_base_url", "icf_image", "store_base_dir", "store_base_dir_niftis"]
         )
         config = Config(
             cfg.get("orthanc_base_url"),
             Path(cfg["icf_image"]).expanduser(),
             Path(cfg["store_base_dir"]).expanduser(),
+            Path(cfg["store_base_dir_niftis"]).expanduser(),#STEFFI
         )
         return config
 
