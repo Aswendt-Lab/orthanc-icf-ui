@@ -387,7 +387,7 @@ class OrthancApp(App):
         files = [
             Path(d) / "config.toml"
             for d in (
-                platformdirs.user_config_dir(app),
+                #platformdirs.user_config_dir(app),
                 platformdirs.site_config_dir(app),
             )
         ]
