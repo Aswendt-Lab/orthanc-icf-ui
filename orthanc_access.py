@@ -8,6 +8,12 @@ from zipfile import ZipFile
 
 import os
 import shutil
+import sys
+
+import logging
+
+logging.basicConfig(filename='ausgabeee.txt', level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+
 
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal
@@ -29,9 +35,13 @@ import platformdirs
 class OrthancClient:
     """Interactions with the Orthanc API"""
 
-    def __init__(self, baseurl):
+    '''def __init__(self, baseurl):
         self.baseurl = baseurl
         self.client = None
+        
+        # Timeout-Einstellungen definieren
+        self.timeout = httpx.Timeout(90.0)  # Anpassen nach Bedarf
+
 
     async def login(self, user, password) -> None:
         """Check if credentials work and remember them
@@ -47,8 +57,27 @@ class OrthancClient:
             self.client = httpx.AsyncClient(auth=(user, password))
 
         response = await self.client.get(f"{self.baseurl}/system")
-        response.raise_for_status()
+        response.raise_for_status()'''
+     
+    def __init__(self, baseurl, user=None, password=None):
+            self.baseurl = baseurl
+            self.client = httpx.AsyncClient(
+                auth=(user, password) if user and password else None,
+                #timeout=httpx.Timeout(90.0) , # Timeout auf 90 Sekunden setzen
+                timeout=90.0
+            )
 
+    async def login(self, user, password) -> None:
+        """Check if credentials work and remember them."""
+        # Falls nötig, Client neu initialisieren, aber dies ist optional
+        if user == "" and password == "":
+            self.client = httpx.AsyncClient(auth=None, timeout=90.0)
+        else:
+            self.client = httpx.AsyncClient(auth=(user, password), timeout=90.0)
+
+        response = await self.client.get(f"{self.baseurl}/system")
+        response.raise_for_status()
+        
     async def query(self, date: str) -> list:
         """Perform a date query using /tools/find API
 
@@ -92,6 +121,7 @@ class OrthancClient:
         directory.
 
         """
+        timeout=httpx.Timeout(90.0)  # Timeout auf 90 Sekunden setzen
         outdir = Path(gettempdir())
         zip_path = outdir.joinpath(f"{study_id}.zip")
         out_path = outdir.joinpath(f"{study_id}")
@@ -100,7 +130,7 @@ class OrthancClient:
             "GET", f"{self.baseurl}/studies/{study_id}/archive"
         ) as r:
             async with aiofiles.open(zip_path, "wb") as f:
-                async for chunk in r.aiter_bytes(chunk_size=10 * 1024):
+                async for chunk in r.aiter_bytes(chunk_size=512): #10 * 1024, danach 1*1024
                     await f.write(chunk)
 
         with ZipFile(zip_path) as zf:
@@ -142,7 +172,7 @@ class OrthancApp(App):
         yield RichLog(highlight=True, markup=True)
         yield Footer()
 
-    async def call_icf(self, cmd: str, *args) -> None:
+    async def call_icf_old(self, cmd: str, *args) -> None:
         """Helper to call ICF commands as asyncio subprocesses
 
         Creates the subprocess, awaits its exit, and prints the result
@@ -168,21 +198,46 @@ class OrthancApp(App):
             msg = f"[red]ERROR {returncode}[/red]"
 
         log.write(f"({msg}) {cmd}")
+        
+        
+    async def call_icf(self, cmd: str, *args) -> None:
+        """Helper to call ICF commands as asyncio subprocesses."""
+        log = self.query_one(RichLog)
 
+        proc = await asyncio.create_subprocess_exec(
+            self.config.icf_image,
+            cmd,
+            *args,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        
+        stdout, stderr = await proc.communicate()  # Warte auf den Abschluss des Prozesses
+        returncode = proc.returncode
+
+        if returncode == 0:
+            msg = "[green]OK[/green]"
+            log.write(f"({msg}) {cmd}")
+        else:
+            error_message = stderr.decode().strip()  # Fehlerausgabe dekodieren
+            log.write(f"[red]ERROR {returncode}: {error_message}[/red]")
+            logging.error(f"Fehler bei {cmd}: {error_message}", exc_info=True)  # Fehler ins Log
+        
     async def icf_workflow(self, orthanc_study_ids: list) -> None:
-        """Run the workflow: orthanc export, icf utils
-
-        Loops over all selected orthanc studies.
-
-        """
         log = self.query_one(RichLog)
 
         for s in orthanc_study_ids:
             log.write(f"Processing dicom study id {s}")
 
-            # export dicoms from orthanc
+            # Exportiere dicoms von Orthanc
             export_dir = await self.orthanc.export(s)
             log.write(f"Exported {export_dir}")
+            study_id, visit_id = self._parse_id(self.listed_studies[s])
+            # Versuche, den Datalad-Befehl auszuführen
+            
+            # added for logging
+    
+
 
             # work on subdirectory (<orthanc study id>/<subject ID> <subject name>)
             subdirs = [child for child in export_dir.iterdir() if child.is_dir()]
@@ -191,17 +246,23 @@ class OrthancApp(App):
 
             # figure out study & visit ID from patient ID
             study_id, visit_id = self._parse_id(self.listed_studies[s])
+            
+            
+            try:
+                result = await self.call_icf(
+                    "make_studyvisit_archive",
+                    "--output-dir",
+                    self.config.store_base_dir,
+                    "--id",
+                    study_id,
+                    visit_id,
+                    dicom_dir,
+                )
+                log.write(f"Erfolgreich: {result}")
 
-            result = await self.call_icf(
-                "make_studyvisit_archive",
-                "--output-dir",  # psychoinformatics-de/inm-icf-utilities/issues/52
-                self.config.store_base_dir,
-                "--id",
-                study_id,
-                visit_id,
-                dicom_dir,
-            )
-
+            except Exception as e:
+                log.write(f"[red]Fehler bei make_studyvisit_archive: {e}[/red]")
+                logging.error(f"Fehler bei make_studyvisit_archive für {s}: {e}", exc_info=True)
             result = await self.call_icf(
                 "deposit_visit_metadata",
                 "--store-dir",
@@ -234,6 +295,12 @@ class OrthancApp(App):
             # Define the path to the dcm2niix executable
             log.write("STEFFI")
             p = export_dir
+            
+            #try:
+             #   shutil.rmtree(p)
+            #except:
+             #   log.write('EEEEEEEEEEEEEEEE')
+            
             log.write("p is ")
             log.write(str(p))
             p2 = self.config.store_base_dir_niftis #store_base_dir_niftis
@@ -270,17 +337,153 @@ class OrthancApp(App):
                 log.write('nifti archiving... starts')
                 shutil.make_archive(str(p2)+'/'+study_id+'/'+visit_id, 'zip', stef_output_dir)
             except:
-                log.write('study name already exists, so dummy is added to the visit_id')
+                log.write('EEEEEEEEEEEEEEEEHstudy name already exists, so dummy is added to the visit_id')
                 try:
                     shutil.make_archive(str(p2)+'/'+study_id+'/'+str('dummy')+visit_id, 'zip', stef_output_dir)
                 except: 
-                    log.write("pls check names in database. Study_Visit_IDs have to be unique!!")
+                    log.write("WHAAAAAAAAAAAAAAAAAAAAATpls check names in database. Study_Visit_IDs have to be unique!!")
                 
             log.write('archiving... finishes')
         
         
             log.write('delete Orthanc temporary files')
-            shutil.rmtree(p)
+            shutil.rmtree(p) #STEFFI not deleted normally
+            #os.remove(str(p)+'.zip')
+                
+    
+
+
+    async def icf_workflow_reaaal(self, orthanc_study_ids: list) -> None:
+        """Run the workflow: orthanc export, icf utils
+
+        Loops over all selected orthanc studies.
+
+        """
+        log = self.query_one(RichLog)
+
+        for s in orthanc_study_ids:
+            
+            # added for logging
+    
+            
+            log.write(f"Processing dicom study id {s}")
+
+            # export dicoms from orthanc
+            export_dir = await self.orthanc.export(s)
+            log.write(f"Exported {export_dir}")
+
+            # work on subdirectory (<orthanc study id>/<subject ID> <subject name>)
+            subdirs = [child for child in export_dir.iterdir() if child.is_dir()]
+            #assert len(subdirs) == 1 #STEFFI
+            dicom_dir = subdirs[0]
+
+            # figure out study & visit ID from patient ID
+            study_id, visit_id = self._parse_id(self.listed_studies[s])
+            
+            try:
+
+                result = await self.call_icf(
+                    "make_studyvisit_archive",
+                    "--output-dir",  # psychoinformatics-de/inm-icf-utilities/issues/52
+                    self.config.store_base_dir,
+                    "--id",
+                    study_id,
+                    visit_id,
+                    dicom_dir,
+                )
+                #log.write(f"JUNGEEEEEEEE {result}")
+                log.write(f"Erfolgreich: {result}")
+                
+            except Exception as e:
+                # Fehler protokollieren
+                log.write(f"[red]Fehler bei make_studyvisit_archive: {e}[/red]")
+                logging.error(f"Fehler bei make_studyvisit_archive für {s}: {e}", exc_info=True)
+
+            result = await self.call_icf(
+                "deposit_visit_metadata",
+                "--store-dir",
+                self.config.store_base_dir,
+                "--id",
+                study_id,
+                visit_id,
+            )
+
+            result = await self.call_icf(
+                "deposit_visit_dataset",
+                "--store-dir",
+                self.config.store_base_dir,
+                "--id",
+                study_id,
+                visit_id,
+                # todo: --store-url (once we know it)
+            )
+
+            result = await self.call_icf(
+                "catalogify_studyvisit_from_meta",
+                "--store-dir",
+                self.config.store_base_dir,
+                "--id",
+                study_id,
+                visit_id,
+            )
+            
+            #STEFFI
+            # Define the path to the dcm2niix executable
+            log.write("STEFFI")
+            p = export_dir
+            
+            #try:
+             #   shutil.rmtree(p)
+            #except:
+             #   log.write('EEEEEEEEEEEEEEEE')
+            
+            log.write("p is ")
+            log.write(str(p))
+            p2 = self.config.store_base_dir_niftis #store_base_dir_niftis
+            log.write("p2 is ")
+            log.write(str(p2))
+            dcm2niix_path = "/usr/bin/dcm2niix"  # Adjust this to the correct path
+            stef_input_dir = str(p)
+            stef_output_dir = str(p)+str('/niftis')
+            log.write("stef_output_dir is ")
+            log.write(str(stef_output_dir))
+            #os.mkdir(stef_output_dir)
+            try:
+                os.mkdir(stef_output_dir)
+            except:
+                log.write("nifti tmp dir already exists")
+            command = [dcm2niix_path, "-f", "%i_%p" ,"-o", stef_output_dir, stef_input_dir]
+            #log.write("nifti conversion starts")
+	    
+            try:
+                # Run the command
+                log.write("start nifti conversion")
+                result = subprocess.run(command, check=True, capture_output=True, text=True)
+            except:
+                log.write("NOPE to nifti conversion")
+
+
+	
+	
+            #log.write('nifti archiving... starts')
+            #os.mkdir(str(p2)+visit_id)
+            #shutil.make_archive(str(p2)+visit_id, 'zip', stef_output_dir)
+            #breakgizuguo
+            try:
+                log.write('nifti archiving... starts')
+                shutil.make_archive(str(p2)+'/'+study_id+'/'+visit_id, 'zip', stef_output_dir)
+            except:
+                log.write('EEEEEEEEEEEEEEEEHstudy name already exists, so dummy is added to the visit_id')
+                try:
+                    shutil.make_archive(str(p2)+'/'+study_id+'/'+str('dummy')+visit_id, 'zip', stef_output_dir)
+                except: 
+                    log.write("WHAAAAAAAAAAAAAAAAAAAAATpls check names in database. Study_Visit_IDs have to be unique!!")
+                
+            log.write('archiving... finishes')
+        
+        
+            log.write('delete Orthanc temporary files')
+            shutil.rmtree(p) #STEFFI not deleted normally
             #os.remove(str(p)+'.zip')
 	    
             
@@ -412,7 +615,16 @@ class OrthancApp(App):
         )
         return config
 
-
+'''
 if __name__ == "__main__":
     app = OrthancApp()
     app.run()
+    '''
+if __name__ == "__main__":
+    logging.info("Starte die Anwendung...")
+    try:
+        app = OrthancApp()
+        app.run()
+        logging.info("Anwendung beendet.")
+    except Exception as e:
+        logging.error(f"Ein Fehler ist aufgetreten: {e}")
