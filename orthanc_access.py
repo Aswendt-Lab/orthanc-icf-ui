@@ -9,6 +9,7 @@ from zipfile import ZipFile
 import os
 import shutil
 import sys
+import datetime
 
 import logging
 
@@ -333,16 +334,34 @@ class OrthancApp(App):
             #os.mkdir(str(p2)+visit_id)
             #shutil.make_archive(str(p2)+visit_id, 'zip', stef_output_dir)
             #breakgizuguo
-            try:
-                log.write('nifti archiving... starts')
-                shutil.make_archive(str(p2)+'/'+study_id+'/'+visit_id, 'zip', stef_output_dir)
-            except:
-                log.write('EEEEEEEEEEEEEEEEHstudy name already exists, so dummy is added to the visit_id')
+            
+            if visit_id in ["T0001_V01_20241106", "T0002_V01_20241106"]:
+
+                log.write("BEEP BEEP EXCEPTION NEMOS")
+                aktuelle_zeit = datetime.datetime.now().strftime("%H%M")
+                aktuelle_zeit_zahl = str(aktuelle_zeit)
                 try:
-                    shutil.make_archive(str(p2)+'/'+study_id+'/'+str('dummy')+visit_id, 'zip', stef_output_dir)
-                except: 
-                    log.write("WHAAAAAAAAAAAAAAAAAAAAATpls check names in database. Study_Visit_IDs have to be unique!!")
+                    log.write('nifti archiving... starts')
+                    shutil.make_archive(str(p2)+'/'+study_id+'/'+visit_id+aktuelle_zeit_zahl, 'zip', stef_output_dir)
+                except:
+                    log.write('EEEEEEEEEEEEEEEEHstudy name already exists, so dummy is added to the visit_id')
+                    try:
+                        shutil.make_archive(str(p2)+'/'+study_id+'/'+str('nemos2')+visit_id+aktuelle_zeit_zahl, 'zip', stef_output_dir)
+                    except: 
+                        log.write("WHAAAAAAAAAAAAAAAAAAAAATpls check names in database. Study_Visit_IDs have to be unique!!")
                 
+            else:
+            
+                try:
+                    log.write('nifti archiving... starts')
+                    shutil.make_archive(str(p2)+'/'+study_id+'/'+visit_id, 'zip', stef_output_dir)
+                except:
+                    log.write('EEEEEEEEEEEEEEEEHstudy name already exists, so dummy is added to the visit_id')
+                    try:
+                        shutil.make_archive(str(p2)+'/'+study_id+'/'+str('dummy')+visit_id, 'zip', stef_output_dir)
+                    except: 
+                        log.write("WHAAAAAAAAAAAAAAAAAAAAATpls check names in database. Study_Visit_IDs have to be unique!!")
+                    
             log.write('archiving... finishes')
         
         
@@ -379,7 +398,7 @@ class OrthancApp(App):
 
             # figure out study & visit ID from patient ID
             study_id, visit_id = self._parse_id(self.listed_studies[s])
-            
+            '''
             try:
 
                 result = await self.call_icf(
@@ -426,7 +445,7 @@ class OrthancApp(App):
                 study_id,
                 visit_id,
             )
-            
+            '''
             #STEFFI
             # Define the path to the dcm2niix executable
             log.write("STEFFI")
@@ -475,7 +494,7 @@ class OrthancApp(App):
             except:
                 log.write('EEEEEEEEEEEEEEEEHstudy name already exists, so dummy is added to the visit_id')
                 try:
-                    shutil.make_archive(str(p2)+'/'+study_id+'/'+str('dummy')+visit_id, 'zip', stef_output_dir)
+                    shutil.make_archive(str(p2)+'/'+study_id+'/'+str('another')+visit_id, 'zip', stef_output_dir)
                 except: 
                     log.write("WHAAAAAAAAAAAAAAAAAAAAATpls check names in database. Study_Visit_IDs have to be unique!!")
                 
